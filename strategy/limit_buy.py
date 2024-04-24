@@ -3,6 +3,7 @@ import os
 import logging
 from pprint import pprint
 from typing import Union, List
+from time import sleep
 
 from dotenv import load_dotenv
 import requests
@@ -128,7 +129,7 @@ def create_limit_buy_order(btc_price: float, volume_btc: float) -> None:
                 "ordertype": "limit",
                 "price": btc_price,
                 "volume": volume_btc,
-                "validate": True,  # Set to False to actually place the order. True is for validation only.
+                "validate": False,  # Set to False to actually place the order. True is for validation only.
             },
         )
 
@@ -204,12 +205,12 @@ def distribute_buy_orders_by_btc_volume(
         # Place the limit buy order
         create_limit_buy_order(btc_price=order_price, volume_btc=btc_volume)
 
-
     logging.info(f"Placed {n_orders} orders")
     logging.info(f"Total cost €{total_cost}")
     logging.info(f"Estimated balance €{account_balance}")
 
-    new_balance = get_euro_balance()
+    get_euro_balance()
+
 
 def main() -> None:
     # Cancels all existing orders and places distributed limit buy orders
@@ -219,9 +220,9 @@ def main() -> None:
 
 def main2() -> None:
     # Cancels all existing orders and places distributed limit buy orders
-    #cancel_all_open_orders()
+    cancel_all_open_orders()
     distribute_buy_orders_by_btc_volume(
-        btc_volume=0.001, percent_step=-1, percent_discount=-5
+        btc_volume=0.001, percent_step=-2, percent_discount=-5
     )
 
 
