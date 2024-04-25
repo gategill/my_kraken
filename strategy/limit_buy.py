@@ -12,10 +12,23 @@ from pykrakenapi import KrakenAPI
 import pandas as pd
 import numpy as np
 
-load_dotenv()  # take environment variables from .env.
+load_dotenv()  # take environment variables from .env
 
 
-def cancel_all_open_orders() -> None:
+class MyKraken:
+    def __init__(self):
+        pass
+
+
+def cancel_all_open_orders(mock: bool = True) -> None:
+    """
+
+    Parameters:
+        mock (bool): Set to False to actually place the order. True is for validation only.
+
+    Returns:
+        None
+    """
     logging.info("Deleting Open Orders")
     # Initialize the Kraken API client
     k = krakenex.API()
@@ -23,6 +36,11 @@ def cancel_all_open_orders() -> None:
     # Load API key and secret from environment variables for security
     k.key = os.getenv("API_KEY")
     k.secret = os.getenv("API_SECRET")
+
+    # If mock is True, just log msg and return None to break
+    if mock:
+        logging.debug(f"Mocking cancelling orders.")
+        return None
 
     try:
         # Use the CancelAll endpoint to cancel all open orders
@@ -40,7 +58,10 @@ def cancel_all_open_orders() -> None:
 
 
 def get_current_price() -> Union[float, None]:
-    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=eur"
+    url = os.getenv(
+        "MARKET_ENDPOINT",
+        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=eur",
+    )
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -54,8 +75,8 @@ def get_current_price() -> Union[float, None]:
         return None
 
 
-def distribute_buy_orders(
-    n_orders: int, min_percentage: float, max_percentage: float
+def distribute_buy_orders_by_n_orders(
+    n_orders: int, min_percentage: float, max_percentage: float, mock: bool = True
 ) -> None:
     logging.info(f"Placing {n_orders} orders")
     euro_balance = get_euro_balance()
@@ -66,8 +87,8 @@ def distribute_buy_orders(
     logging.info(f"Euro per order €{euro_per_order}")
     min_euro_amount = 30
     if euro_per_order < min_euro_amount:
-        raise Exception(
-            "Sorry, the euro order amount is less than the min euro amount. Try lowering N, the number of orders"
+        raise ValueError(
+            f"Ups, something went wrong. The euro order amount is less than the min euro amount. Try lowering n_orders, the number of orders. euro_per_order < min_euro_amount, {euro_per_order} < {min_euro_amount}"
         )
 
     # Generate percentages using numpy.linspace
@@ -82,15 +103,18 @@ def distribute_buy_orders(
         volume = euro_per_order / target_price
 
         # Place the limit buy order
-        create_limit_buy_order(btc_price=target_price, volume_btc=volume)
+        create_limit_buy_order(btc_price=target_price, volume_btc=volume, mock=mock)
 
 
 def get_euro_balance() -> float:
     logging.debug("Getting Euro balance")
 
     # Initialize Kraken API
-    API_KEY = os.getenv("API_KEY")
-    API_SECRET = os.getenv("API_SECRET")
+    API_KEY = os.getenv("API_KEY", None)
+    API_SECRET = os.getenv("API_SECRET", None)
+
+    if (API_KEY is None) or (API_SECRET is None):
+        raise ValueError("Could not read in the API_KEY and API_SECRET")
 
     api = krakenex.API(key=API_KEY, secret=API_SECRET)
     kraken = KrakenAPI(api)
@@ -107,12 +131,22 @@ def get_euro_balance() -> float:
     return float(euro_balance)
 
 
-def create_limit_buy_order(btc_price: float, volume_btc: float) -> None:
-    # Placeholder: Implement the logic to place a limit buy order
+def create_limit_buy_order(
+    btc_price: float, volume_btc: float, mock: bool = True
+) -> None:
+    """
+    Function to create a limit buy order using the Kraken API.
+
+    Parameters:
+        btc_price (float): The price at which to place the buy order.
+        volume_btc (float): The volume of Bitcoin to be purchased.
+        mock (bool): Set to False to actually place the order. True is for validation only.
+
+    Returns:
+        None
+    """
+
     order_price = round(btc_price * volume_btc)
-    logging.debug(
-        f"Placing order: Buy {volume_btc:.6f} BTC at €{btc_price:.2f} at {order_price=}"
-    )
 
     API_KEY = os.getenv("API_KEY")
     API_SECRET = os.getenv("API_SECRET")
@@ -129,7 +163,7 @@ def create_limit_buy_order(btc_price: float, volume_btc: float) -> None:
                 "ordertype": "limit",
                 "price": btc_price,
                 "volume": volume_btc,
-                "validate": False,  # Set to False to actually place the order. True is for validation only.
+                "validate": mock,  # Set to False to actually place the order. True is for validation only.
             },
         )
 
@@ -137,14 +171,14 @@ def create_limit_buy_order(btc_price: float, volume_btc: float) -> None:
             logging.error(f"Error placing order: {order['error']}")
         else:
             logging.info(
-                f"Order placed successfully - {order['result']['descr']['order']}"
+                f"Order placed successfully - {order['result']['descr']['order']} @ cost €{order_price}"
             )
     except Exception as e:
         logging.error(f"An error occurred: {e}")
 
 
 def distribute_buy_orders_by_btc_volume(
-    btc_volume: float, percent_step: float, percent_discount: float
+    btc_volume: float, percent_step: float, percent_discount: float, mock: bool = True
 ) -> None:
     """
     Distributes buy orders for Bitcoin at different price levels but with a fixed volume for each order.
@@ -155,6 +189,7 @@ def distribute_buy_orders_by_btc_volume(
         btc_volume (float): The fixed volume of Bitcoin to be purchased for each order.
         percent_step (float): The percentage step between each buy order's price level. A negative value indicates a decrease in price levels, while a positive value indicates an increase.
         percent_discount (float): The percentage discount from the current BTC price at which to start placing orders. A negative value indicates a discount, while a positive value indicates a premium.
+        mock (bool): Set to False to actually place the order. True is for validation only.
 
     Returns:
         None
@@ -203,7 +238,7 @@ def distribute_buy_orders_by_btc_volume(
         account_balance = round(account_balance)
 
         # Place the limit buy order
-        create_limit_buy_order(btc_price=order_price, volume_btc=btc_volume)
+        create_limit_buy_order(btc_price=order_price, volume_btc=btc_volume, mock=mock)
 
     logging.info(f"Placed {n_orders} orders")
     logging.info(f"Total cost €{total_cost}")
@@ -215,14 +250,19 @@ def distribute_buy_orders_by_btc_volume(
 def main() -> None:
     # Cancels all existing orders and places distributed limit buy orders
     cancel_all_open_orders()
-    distribute_buy_orders(n_orders=20, min_percentage=-1, max_percentage=-15)
+    distribute_buy_orders_by_n_orders(
+        n_orders=20, min_percentage=-1, max_percentage=-15
+    )
 
 
 def main2() -> None:
     # Cancels all existing orders and places distributed limit buy orders
-    cancel_all_open_orders()
+
+    mock = True
+
+    cancel_all_open_orders(mock)
     distribute_buy_orders_by_btc_volume(
-        btc_volume=0.001, percent_step=-2, percent_discount=-5
+        btc_volume=0.001, percent_step=-2, percent_discount=-5, mock=mock
     )
 
 
